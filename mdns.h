@@ -173,7 +173,7 @@ struct mdns_header_t {
 //! random user level ephemeral port. To run discovery service listening for incoming discoveries
 //! and queries, you must set MDNS_PORT as port.
 static int
-mdns_socket_open_ipv4(struct sockaddr_in* saddr);
+mdns_socket_open_ipv4(const struct sockaddr_in* saddr);
 
 //! Setup an already opened IPv4 socket for mDNS/DNS-SD. To bind the socket to a specific interface,
 //! pass in the appropriate socket address in saddr, otherwise pass a null pointer for INADDR_ANY.
@@ -181,7 +181,7 @@ mdns_socket_open_ipv4(struct sockaddr_in* saddr);
 //! random user level ephemeral port. To run discovery service listening for incoming discoveries
 //! and queries, you must set MDNS_PORT as port.
 static int
-mdns_socket_setup_ipv4(int sock, struct sockaddr_in* saddr);
+mdns_socket_setup_ipv4(int sock, const struct sockaddr_in* saddr);
 
 //! Open and setup a IPv6 socket for mDNS/DNS-SD. To bind the socket to a specific interface, pass
 //! in the appropriate socket address in saddr, otherwise pass a null pointer for in6addr_any. To
@@ -189,7 +189,7 @@ mdns_socket_setup_ipv4(int sock, struct sockaddr_in* saddr);
 //! random user level ephemeral port. To run discovery service listening for incoming discoveries
 //! and queries, you must set MDNS_PORT as port.
 static int
-mdns_socket_open_ipv6(struct sockaddr_in6* saddr);
+mdns_socket_open_ipv6(const struct sockaddr_in6* saddr);
 
 //! Setup an already opened IPv6 socket for mDNS/DNS-SD. To bind the socket to a specific interface,
 //! pass in the appropriate socket address in saddr, otherwise pass a null pointer for in6addr_any.
@@ -197,7 +197,7 @@ mdns_socket_open_ipv6(struct sockaddr_in6* saddr);
 //! random user level ephemeral port. To run discovery service listening for incoming discoveries
 //! and queries, you must set MDNS_PORT as port.
 static int
-mdns_socket_setup_ipv6(int sock, struct sockaddr_in6* saddr);
+mdns_socket_setup_ipv6(int sock, const struct sockaddr_in6* saddr);
 
 //! Close a socket opened with mdns_socket_open_ipv4 and mdns_socket_open_ipv6.
 static void
@@ -270,6 +270,13 @@ static int
 mdns_announce_multicast(int sock, void* buffer, size_t capacity, mdns_record_t answer,
                         mdns_record_t* authority, size_t authority_count, mdns_record_t* additional,
                         size_t additional_count);
+
+//! Send a variable multicast mDNS announcement. Use this on service end for removing the resource
+//! from the local network. The records must be identical to the according announcement.
+static int
+mdns_goodbye_multicast(int sock, void* buffer, size_t capacity, mdns_record_t answer,
+                       mdns_record_t* authority, size_t authority_count, mdns_record_t* additional,
+                       size_t additional_count);
 
 // Parse records functions
 
@@ -353,7 +360,7 @@ mdns_htonl(void* data, uint32_t val) {
 }
 
 static int
-mdns_socket_open_ipv4(struct sockaddr_in* saddr) {
+mdns_socket_open_ipv4(const struct sockaddr_in* saddr) {
 	int sock = (int)socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
 	if (sock < 0)
 		return -1;
@@ -365,7 +372,7 @@ mdns_socket_open_ipv4(struct sockaddr_in* saddr) {
 }
 
 static int
-mdns_socket_setup_ipv4(int sock, struct sockaddr_in* saddr) {
+mdns_socket_setup_ipv4(int sock, const struct sockaddr_in* saddr) {
 	unsigned char ttl = 1;
 	unsigned char loopback = 1;
 	unsigned int reuseaddr = 1;
@@ -387,22 +394,22 @@ mdns_socket_setup_ipv4(int sock, struct sockaddr_in* saddr) {
 
 	struct sockaddr_in sock_addr;
 	if (!saddr) {
-		saddr = &sock_addr;
-		memset(saddr, 0, sizeof(struct sockaddr_in));
-		saddr->sin_family = AF_INET;
-		saddr->sin_addr.s_addr = INADDR_ANY;
+		memset(&sock_addr, 0, sizeof(struct sockaddr_in));
+		sock_addr.sin_family = AF_INET;
+		sock_addr.sin_addr.s_addr = INADDR_ANY;
 #ifdef __APPLE__
-		saddr->sin_len = sizeof(struct sockaddr_in);
+		sock_addr.sin_len = sizeof(struct sockaddr_in);
 #endif
 	} else {
-		setsockopt(sock, IPPROTO_IP, IP_MULTICAST_IF, (const char*)&saddr->sin_addr,
-		           sizeof(saddr->sin_addr));
+		memcpy(&sock_addr, saddr, sizeof(struct sockaddr_in));
+		setsockopt(sock, IPPROTO_IP, IP_MULTICAST_IF, (const char*)&sock_addr.sin_addr,
+		           sizeof(sock_addr.sin_addr));
 #ifndef _WIN32
-		saddr->sin_addr.s_addr = INADDR_ANY;
+		sock_addr.sin_addr.s_addr = INADDR_ANY;
 #endif
 	}
 
-	if (bind(sock, (struct sockaddr*)saddr, sizeof(struct sockaddr_in)))
+	if (bind(sock, (struct sockaddr*)&sock_addr, sizeof(struct sockaddr_in)))
 		return -1;
 
 #ifdef _WIN32
@@ -417,7 +424,7 @@ mdns_socket_setup_ipv4(int sock, struct sockaddr_in* saddr) {
 }
 
 static int
-mdns_socket_open_ipv6(struct sockaddr_in6* saddr) {
+mdns_socket_open_ipv6(const struct sockaddr_in6* saddr) {
 	int sock = (int)socket(AF_INET6, SOCK_DGRAM, IPPROTO_UDP);
 	if (sock < 0)
 		return -1;
@@ -429,7 +436,7 @@ mdns_socket_open_ipv6(struct sockaddr_in6* saddr) {
 }
 
 static int
-mdns_socket_setup_ipv6(int sock, struct sockaddr_in6* saddr) {
+mdns_socket_setup_ipv6(int sock, const struct sockaddr_in6* saddr) {
 	int hops = 1;
 	unsigned int loopback = 1;
 	unsigned int reuseaddr = 1;
@@ -451,22 +458,22 @@ mdns_socket_setup_ipv6(int sock, struct sockaddr_in6* saddr) {
 
 	struct sockaddr_in6 sock_addr;
 	if (!saddr) {
-		saddr = &sock_addr;
-		memset(saddr, 0, sizeof(struct sockaddr_in6));
-		saddr->sin6_family = AF_INET6;
-		saddr->sin6_addr = in6addr_any;
+		memset(&sock_addr, 0, sizeof(struct sockaddr_in6));
+		sock_addr.sin6_family = AF_INET6;
+		sock_addr.sin6_addr = in6addr_any;
 #ifdef __APPLE__
-		saddr->sin6_len = sizeof(struct sockaddr_in6);
+		sock_addr.sin6_len = sizeof(struct sockaddr_in6);
 #endif
 	} else {
+		memcpy(&sock_addr, saddr, sizeof(struct sockaddr_in6));
 		unsigned int ifindex = 0;
 		setsockopt(sock, IPPROTO_IPV6, IPV6_MULTICAST_IF, (const char*)&ifindex, sizeof(ifindex));
 #ifndef _WIN32
-		saddr->sin6_addr = in6addr_any;
+		sock_addr.sin6_addr = in6addr_any;
 #endif
 	}
 
-	if (bind(sock, (struct sockaddr*)saddr, sizeof(struct sockaddr_in6)))
+	if (bind(sock, (struct sockaddr*)&sock_addr, sizeof(struct sockaddr_in6)))
 		return -1;
 
 #ifdef _WIN32
@@ -706,13 +713,12 @@ mdns_string_make_ref(void* data, size_t capacity, size_t ref_offset) {
 static void*
 mdns_string_make(void* buffer, size_t capacity, void* data, const char* name, size_t length,
                  mdns_string_table_t* string_table) {
-	size_t pos = 0;
 	size_t last_pos = 0;
 	size_t remain = capacity - MDNS_POINTER_DIFF(data, buffer);
 	if (name[length - 1] == '.')
 		--length;
 	while (last_pos < length) {
-		pos = mdns_string_find(name, length, '.', last_pos);
+		size_t pos = mdns_string_find(name, length, '.', last_pos);
 		size_t sub_length = ((pos != MDNS_INVALID_POS) ? pos : length) - last_pos;
 		size_t total_length = length - last_pos;
 
@@ -1137,8 +1143,10 @@ mdns_answer_add_question_unicast(void* buffer, size_t capacity, void* data,
                                  mdns_record_type_t record_type, const char* name,
                                  size_t name_length, mdns_string_table_t* string_table) {
 	data = mdns_string_make(buffer, capacity, data, name, name_length, string_table);
+	if (!data)
+		return 0;
 	size_t remain = capacity - MDNS_POINTER_DIFF(data, buffer);
-	if (!data || (remain <= 4))
+	if (remain < 4)
 		return 0;
 
 	data = mdns_htons(data, record_type);
@@ -1150,10 +1158,11 @@ mdns_answer_add_question_unicast(void* buffer, size_t capacity, void* data,
 static void*
 mdns_answer_add_record_header(void* buffer, size_t capacity, void* data, mdns_record_t record,
                               uint16_t rclass, uint32_t ttl, mdns_string_table_t* string_table) {
-	data =
-	    mdns_string_make(buffer, capacity, data, record.name.str, record.name.length, string_table);
+	data = mdns_string_make(buffer, capacity, data, record.name.str, record.name.length, string_table);
+	if (!data)
+		return 0;
 	size_t remain = capacity - MDNS_POINTER_DIFF(data, buffer);
-	if (!data || (remain < 10))
+	if (remain < 10)
 		return 0;
 
 	data = mdns_htons(data, record.type);
@@ -1245,8 +1254,10 @@ mdns_answer_add_txt_record(void* buffer, size_t capacity, void* data, mdns_recor
 		// termination, thus the <= check
 		size_t string_length =
 		    records[irec].data.txt.key.length + records[irec].data.txt.value.length + 1;
+		if (!data)
+			return 0;
 		remain = capacity - MDNS_POINTER_DIFF(data, buffer);
-		if (!data || (remain <= string_length) || (string_length > 0x3FFF))
+		if ((remain <= string_length) || (string_length > 0x3FFF))
 			return 0;
 
 		unsigned char* strdata = (unsigned char*)data;
@@ -1332,14 +1343,13 @@ mdns_query_answer_unicast(int sock, const void* address, size_t address_size, vo
 	return mdns_unicast_send(sock, address, address_size, buffer, tosend);
 }
 
+
 static int
-mdns_answer_multicast_rclass(int sock, void* buffer, size_t capacity, uint16_t rclass,
+mdns_answer_multicast_rclass_ttl(int sock, void* buffer, size_t capacity, uint16_t rclass,
                              mdns_record_t answer, mdns_record_t* authority, size_t authority_count,
-                             mdns_record_t* additional, size_t additional_count) {
+                             mdns_record_t* additional, size_t additional_count, uint32_t ttl) {
 	if (capacity < (sizeof(struct mdns_header_t) + 32 + 4))
 		return -1;
-
-	uint32_t ttl = 60;
 
 	// Basic answer structure
 	struct mdns_header_t* header = (struct mdns_header_t*)buffer;
@@ -1377,6 +1387,14 @@ mdns_answer_multicast_rclass(int sock, void* buffer, size_t capacity, uint16_t r
 }
 
 static int
+mdns_answer_multicast_rclass(int sock, void* buffer, size_t capacity, uint16_t rclass,
+                             mdns_record_t answer, mdns_record_t* authority, size_t authority_count,
+                             mdns_record_t* additional, size_t additional_count) {
+	return mdns_answer_multicast_rclass_ttl(sock, buffer, capacity, rclass, answer, authority,
+	                                        authority_count, additional, additional_count, 60);
+}
+
+static int
 mdns_query_answer_multicast(int sock, void* buffer, size_t capacity, mdns_record_t answer,
                             mdns_record_t* authority, size_t authority_count,
                             mdns_record_t* additional, size_t additional_count) {
@@ -1392,6 +1410,15 @@ mdns_announce_multicast(int sock, void* buffer, size_t capacity, mdns_record_t a
 	uint16_t rclass = MDNS_CLASS_IN | MDNS_CACHE_FLUSH;
 	return mdns_answer_multicast_rclass(sock, buffer, capacity, rclass, answer, authority,
 	                                    authority_count, additional, additional_count);
+}
+
+static int
+mdns_goodbye_multicast(int sock, void* buffer, size_t capacity, mdns_record_t answer,
+                        mdns_record_t* authority, size_t authority_count, mdns_record_t* additional,
+                        size_t additional_count) {
+	uint16_t rclass = MDNS_CLASS_IN | MDNS_CACHE_FLUSH;
+	return mdns_answer_multicast_rclass_ttl(sock, buffer, capacity, rclass, answer, authority,
+	                                    authority_count, additional, additional_count, 0);
 }
 
 static mdns_string_t
@@ -1457,7 +1484,6 @@ mdns_record_parse_txt(const void* buffer, size_t size, size_t offset, size_t len
                       mdns_record_txt_t* records, size_t capacity) {
 	size_t parsed = 0;
 	const char* strdata;
-	size_t separator, sublength;
 	size_t end = offset + length;
 
 	if (size < end)
@@ -1465,12 +1491,12 @@ mdns_record_parse_txt(const void* buffer, size_t size, size_t offset, size_t len
 
 	while ((offset < end) && (parsed < capacity)) {
 		strdata = (const char*)MDNS_POINTER_OFFSET(buffer, offset);
-		sublength = *(const unsigned char*)strdata;
+		size_t sublength = *(const unsigned char*)strdata;
 
 		++strdata;
 		offset += sublength + 1;
 
-		separator = 0;
+		size_t separator = 0;
 		for (size_t c = 0; c < sublength; ++c) {
 			// DNS-SD TXT record keys MUST be printable US-ASCII, [0x20, 0x7E]
 			if ((strdata[c] < 0x20) || (strdata[c] > 0x7E))

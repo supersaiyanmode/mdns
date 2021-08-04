@@ -421,6 +421,7 @@ open_client_sockets(int* sockets, int max_sockets, int port) {
 		if (ret == ERROR_BUFFER_OVERFLOW) {
 			free(adapter_address);
 			adapter_address = 0;
+			address_size *= 2;
 		} else {
 			break;
 		}
@@ -785,6 +786,19 @@ service_mdns(const char* hostname, const char* service_name, int service_port) {
 	}
 	printf("Opened %d socket%s for mDNS service\n", num_sockets, num_sockets ? "s" : "");
 
+	size_t service_name_length = strlen(service_name);
+	if (!service_name_length) {
+		printf("Invalid service name\n");
+		return -1;
+	}
+
+	char* service_name_buffer = malloc(service_name_length + 2);
+	memcpy(service_name_buffer, service_name, service_name_length);
+	if (service_name_buffer[service_name_length - 1] != '.')
+		service_name_buffer[service_name_length++] = '.';
+	service_name_buffer[service_name_length] = 0;
+	service_name = service_name_buffer;
+
 	printf("Service mDNS: %s:%d\n", service_name, service_port);
 	printf("Hostname: %s\n", hostname);
 
@@ -895,7 +909,25 @@ service_mdns(const char* hostname, const char* service_name, int service_port) {
 		}
 	}
 
+	// Send a goodbye on end of service
+	{
+		mdns_record_t additional[5] = {0};
+		size_t additional_count = 0;
+		additional[additional_count++] = service.record_srv;
+		if (service.address_ipv4.sin_family == AF_INET)
+			additional[additional_count++] = service.record_a;
+		if (service.address_ipv6.sin6_family == AF_INET6)
+			additional[additional_count++] = service.record_aaaa;
+		additional[additional_count++] = service.txt_record[0];
+		additional[additional_count++] = service.txt_record[1];
+
+		for (int isock = 0; isock < num_sockets; ++isock)
+			mdns_goodbye_multicast(sockets[isock], buffer, capacity, service.record_ptr, 0, 0,
+			                        additional, additional_count);
+	}
+
 	free(buffer);
+	free(service_name_buffer);
 
 	for (int isock = 0; isock < num_sockets; ++isock)
 		mdns_socket_close(sockets[isock]);
